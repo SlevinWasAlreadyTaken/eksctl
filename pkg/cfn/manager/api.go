@@ -6,10 +6,11 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
+	astypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/aws-sdk-go/service/cloudformation/cloudformationiface"
 	"github.com/aws/aws-sdk-go/service/eks/eksiface"
@@ -241,7 +242,7 @@ func (c *StackCollection) PropagateManagedNodeGroupTagsToASG(ngName string, ngTa
 	go func() {
 		defer close(errCh)
 		// build the input tags for all ASGs attached to the managed nodegroup
-		asgTags := []*autoscaling.Tag{}
+		asgTags := []astypes.Tag{}
 
 		for _, asgName := range asgNames {
 			// skip directly if not tags are required to be created
@@ -256,7 +257,7 @@ func (c *StackCollection) PropagateManagedNodeGroupTagsToASG(ngName string, ngTa
 			}
 			// build the list of tags to attach to the ASG
 			for ngTagKey, ngTagValue := range ngTags {
-				asgTag := &autoscaling.Tag{
+				asgTag := astypes.Tag{
 					ResourceId:        aws.String(asgName),
 					ResourceType:      aws.String("auto-scaling-group"),
 					Key:               aws.String(ngTagKey),
@@ -268,7 +269,7 @@ func (c *StackCollection) PropagateManagedNodeGroupTagsToASG(ngName string, ngTa
 		}
 
 		// consider the maximum number of tags we can create at once...
-		var chunkedASGTags [][]*autoscaling.Tag
+		var chunkedASGTags [][]astypes.Tag
 		chunkSize := builder.MaximumCreatedTagNumberPerCall
 		for start := 0; start < len(asgTags); start += chunkSize {
 			end := start + chunkSize
@@ -280,7 +281,7 @@ func (c *StackCollection) PropagateManagedNodeGroupTagsToASG(ngName string, ngTa
 		// ...then create all of them in a loop
 		for _, asgTags := range chunkedASGTags {
 			input := &autoscaling.CreateOrUpdateTagsInput{Tags: asgTags}
-			if _, err := c.asgAPI.CreateOrUpdateTags(input); err != nil {
+			if _, err := c.asgAPI.CreateOrUpdateTags(context.Background(), input); err != nil {
 				errCh <- errors.Wrapf(err, "creating or updating asg tags for managed nodegroup %q", ngName)
 				return
 			}
@@ -293,14 +294,14 @@ func (c *StackCollection) PropagateManagedNodeGroupTagsToASG(ngName string, ngTa
 // checkASGTagsNumber limit considering the new propagated tags
 func (c *StackCollection) checkASGTagsNumber(ngName, asgName string, propagatedTags map[string]string) error {
 	tagsFilter := &autoscaling.DescribeTagsInput{
-		Filters: []*autoscaling.Filter{
+		Filters: []astypes.Filter{
 			{
 				Name:   aws.String("auto-scaling-group"),
-				Values: []*string{aws.String(asgName)},
+				Values: []string{asgName},
 			},
 		},
 	}
-	output, err := c.asgAPI.DescribeTags(tagsFilter)
+	output, err := c.asgAPI.DescribeTags(context.Background(), tagsFilter)
 	if err != nil {
 		return errors.Wrapf(err, "describing asg %q tags for managed nodegroup %q", asgName, ngName)
 	}
